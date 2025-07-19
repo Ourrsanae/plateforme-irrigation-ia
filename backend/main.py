@@ -4,6 +4,7 @@ import pandas as pd
 import joblib
 import numpy as np
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 
 # --- CORS (pour React frontend) ---
 app = FastAPI()
@@ -37,6 +38,7 @@ class MeteoInput(BaseModel):
     RH2M: float
     PRECTOTCORR: float
     WS2M: float
+    besoin_L_jour: Optional[float] = None  # nouveau champ facultatif
 
 class BesoinInput(BaseModel):
     culture: str
@@ -46,10 +48,20 @@ class BesoinInput(BaseModel):
 def predict_production(data: MeteoInput):
     df = pd.DataFrame([data.dict()])
     results = {}
+    besoins = data.besoin_L_jour
     for technique, model in MODELS.items():
-        pred = model.predict(df[FEATURES])[0]
-        results[technique] = round(pred, 2)
-    return {"prediction_L_par_jour": results}
+        pred = model.predict(df[FEATURES])[0]  # production L/jour pour 1 module
+        try:
+            prod_unite = float(df_tech[df_tech["Technique"] == technique]["Production_L_jour_unite"].values[0])
+        except:
+            prod_unite = None
+        result = {"production_L_jour": round(pred, 2)}
+        # calculer le nombre d'unités seulement si besoin précisé et prod_unite existe
+        if besoins and prod_unite and prod_unite > 0:
+            n_unites = np.ceil(besoins / pred) if pred > 0 else None
+            result["nombre_unites"] = int(n_unites) if n_unites else None
+        results[technique] = result
+    return {"resultats": results}
 
 @app.post("/estimate_needs")
 def estimate_needs(data: BesoinInput):
